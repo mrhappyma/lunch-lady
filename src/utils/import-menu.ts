@@ -1,25 +1,112 @@
-import { pdf } from "pdf-to-img";
-import { promises as fs } from "node:fs";
-import tesseract from "node-tesseract-ocr";
+import {
+  FunctionDeclarationSchemaType,
+  GoogleGenerativeAI,
+} from "@google/generative-ai";
+import env from "./env";
+import {
+  GoogleAIFileManager,
+  type FileMetadataResponse,
+} from "@google/generative-ai/server";
+import { lunchAiResponse } from "../types/schemas";
+import Airtable from "airtable";
 
-export const importMenu = async (PDFurl: string) => {
-  const pdfRequest = await fetch(PDFurl);
-  const pdfArrayBuffer = await pdfRequest.arrayBuffer();
-  const pdfBuffer = Buffer.from(pdfArrayBuffer);
+const fileManager = new GoogleAIFileManager(env.GOOGLE_AI_API_KEY);
 
-  const images = await pdf(pdfBuffer);
-  let c = 1;
-  for await (const i of images) {
-    await fs.writeFile(`nom-nom-nom/lunch-${c}.png`, i);
-    c++;
-  }
-
-  const t = await tesseract.recognize(`nom-nom-nom/lunch-1.png`, {
-    lang: "eng",
+const uploadFileToGemini = async (path: string, mimeType: string) => {
+  const uploadResult = await fileManager.uploadFile(path, {
+    mimeType,
+    displayName: path,
   });
-  console.log(t.split("\n"));
+  const file = uploadResult.file;
+  console.log(`Uploaded file ${file.displayName} as: ${file.name}`);
+  return file;
 };
 
-await importMenu(
-  "https://www.lancastermennonite.org/wp-content/uploads/2023/02/MS-HS-MAY-3-Menu-1.pdf"
-);
+const waitForActiveFiles = async (files: FileMetadataResponse[]) => {
+  console.log("Waiting for file processing...");
+  for (const name of files.map((file) => file.name)) {
+    let file = await fileManager.getFile(name);
+    while (file.state === "PROCESSING") {
+      process.stdout.write(".");
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+      file = await fileManager.getFile(name);
+    }
+    if (file.state !== "ACTIVE") {
+      throw Error(`File ${file.name} failed to process`);
+    }
+  }
+  console.log("...all files ready\n");
+};
+
+export const importMenu = async (PDFurl: string) => {
+  const PDFrequest = await fetch(PDFurl);
+  const PDFblob = await PDFrequest.blob();
+  await Bun.write("nom-nom-nom/food.pdf", PDFblob);
+
+  const genAI = new GoogleGenerativeAI(env.GOOGLE_AI_API_KEY);
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-pro-exp-0801",
+    systemInstruction:
+      "when you receive a menu pdf, return the lunch for the days it shows, quickly explaining the day's lunch in the style of a stereotypical really really excited lunch lady. name every option specific to the day, exactly as it appears on the menu, and surround it with * characters when you do. if there is no lunch provided for the day, explain why in the same style. provide the date in YYYY-MM-DD format. always return a string in the array for every day shown on the menu.",
+    generationConfig: {
+      temperature: 2,
+      topP: 0.95,
+      topK: 64,
+      maxOutputTokens: 8192,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: FunctionDeclarationSchemaType.OBJECT,
+        properties: {
+          response: {
+            type: FunctionDeclarationSchemaType.ARRAY,
+            //@ts-ignore
+            items: {
+              type: "object",
+              properties: {
+                date: {
+                  type: "string",
+                },
+                text: {
+                  type: "string",
+                },
+              },
+              required: ["date", "text"],
+            },
+          },
+        },
+        required: ["response"],
+      },
+    },
+  });
+
+  const files = [
+    await uploadFileToGemini("nom-nom-nom/food.pdf", "application/pdf"),
+  ];
+  await waitForActiveFiles(files);
+
+  const responseRequest = await model.generateContent([
+    {
+      fileData: {
+        mimeType: files[0].mimeType,
+        fileUri: files[0].uri,
+      },
+    },
+  ]);
+
+  const response = lunchAiResponse.parse(
+    JSON.parse(responseRequest.response.text())
+  ).response;
+
+  const airtable = new Airtable({
+    apiKey: env.AIRTABLE_KEY,
+  }).base("appZ6Cn76GFuSrjdd");
+
+  for (const { date, text } of response) {
+    await airtable.table("lunch").create({
+      date,
+      lunch: text,
+    });
+  }
+
+  console.log("Menu imported successfully");
+};
