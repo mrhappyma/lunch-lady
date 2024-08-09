@@ -1,0 +1,16 @@
+{
+  "name": "lunch",
+  "module": "index.ts",
+  "type": "module",
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@types/node": "^22.1.0",
+    "airtable": "^0.12.2",
+    "node-tesseract-ocr": "^2.2.1",
+    "pdf-to-img": "^4.1.0",
+    "puppeteer": "^23.0.2",
+    "zod": "^3.23.8"
+  }
+}
