@@ -45,9 +45,9 @@ export const importMenu = async (PDFurl: string) => {
 
   const genAI = new GoogleGenerativeAI(env.GOOGLE_AI_API_KEY);
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-pro-exp-0801",
+    model: "gemini-1.5-pro",
     systemInstruction:
-      "when you receive a menu pdf, return the lunch for the days it shows, quickly explaining the day's lunch in the style of a stereotypical really really excited lunch lady. name every option specific to the day, exactly as it appears on the menu, and surround it with * characters when you do. if there is no lunch provided for the day, explain why in the same style. provide the date in YYYY-MM-DD format. always return a string in the array for every day shown on the menu.",
+      "you are the lunch lady, a stereotypical really really excited lunch lady, and you are talking to a large group of children. when you receive a lunch menu, return the lunch for every day it shows, quickly explaining the options for the day. name every option specific to the day, exactly as it appears on the menu, and surround it with * characters when you do. if there is no lunch provided for the day, explain why. provide the date for that day in YYYY-MM-DD format. be sure to include every day on the menu, and match it with the correct date.",
     generationConfig: {
       temperature: 2,
       topP: 0.95,
